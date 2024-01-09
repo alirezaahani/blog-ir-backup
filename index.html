@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="fa">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>خروجی پشتیبان بلاگ بیان</title>
+
+    <style>
+      body {
+        background-color: lightgray;
+        font-size: 1em;
+        font-family: "Vazir", "B Nazanin", "Tahoma", "Noto sans";
+        direction: rtl;
+      }
+      button {
+        font-size: 0.7em;
+        font-family: "Vazir", "B Nazanin", "Tahoma", "Noto sans";
+        direction: rtl;
+      }
+      pre {
+        text-align: left;
+        direction: ltr;
+      }
+      a:hover,
+      a:active,
+      a:focus,
+      a:visited,
+      a:link,
+      a {
+        text-decoration: none;
+      }
+      .title {
+        text-align: center;
+      }
+      .wrp {
+        background-color: white;
+        margin: 0.5em;
+        padding: 0.5em;
+      }
+      .form {
+        margin: 0 auto;
+        text-align: center;
+        width: 16em;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrp">
+      <form class="form">
+        <label for="file">فایل XML خروجی از پنل را انتخاب کنید.</label>
+        <input id="file" type="file" accept=".xml" multiple="false" id="file" />
+
+        <label for="donwload_static">تصاویر در خروجی ذخیره شوند؟</label>
+        <input type="checkbox" name="donwload_static" />
+
+        <button disabled id="button">دریافت</button>
+
+        <span id="logs"></span>
+      </form>
+    </main>
+
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
+      integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js" integrity="sha512-csNcFYJniKjJxRWRV1R7fvnXrycHP6qDR21mgz1ZP55xY5d+aHLfo9/FcGDQLfn2IfngbAHd8LdfsagcCqgTcQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+    <script>
+      "use strict";
+
+      const NON_HTTP_MATCH = /"((?!http.:)\/\/.+?)"/gim;
+      const PICTURE_MATCH = /https?:\/\/\S+(?:jpe?g|png|bmp|gif|webp)/gim;
+
+      let emitStyle = () => {
+        return `
+        body {
+          background-color: lightgray;
+          font-size: 1em;
+          font-family: "Vazir", "B Nazanin", "Tahoma", "Noto sans";
+          direction: rtl;
+        }
+        pre {
+            text-align: left;
+            direction: ltr;
+        }        
+        a:hover, a:active, a:focus, a:visited, a:link, a {
+            text-decoration: none;
+        }
+        .title {
+            text-align: center;
+        }
+        .wrp {
+          background-color: white;
+          margin: 0.5em;
+          padding: 0.5em;
+        }
+      `;
+      };
+
+      let emitHomeHTML = (title, desc, authors, posts) => {
+        let posts_html = "<ol reversed>";
+        posts.forEach((post) => {
+          posts_html += `<li><a href="./${post["index"]}.html">${post["title"]}</a></li>`;
+        });
+
+        posts_html += "</ol>";
+
+        return `
+          <html>
+            <head>
+                <title>${title}</title>
+                <meta charset="utf-8" />
+                <link rel="stylesheet" href="../statics/main.css">
+            </head>
+            <body>
+            <main class="wrp">
+                    <h1 class="title">${title}</h1>
+                    <h3>${desc}</h3>
+                    <h4>نویسندگان: ${authors.join(",")}</h4>
+                    ${posts_html}
+            </div>
+            </body>
+        </html>
+          `;
+      };
+
+      let emitPostHTML = (
+        title,
+        content,
+        creation_date,
+        modify_date,
+        categories,
+        tags,
+        blog_title
+      ) => {
+        return `
+            <html>
+            <head>
+                <title>${title}</title>
+                <meta charset="utf-8" />
+                <link rel="stylesheet" href="../statics/main.css">
+            </head>
+            <body>
+            <main class="wrp">
+                <h1 class="title"><a href='./index.html'>${blog_title}</a></h1>
+                <h2 class="title">${title}</h2>
+                <p>ایجاد در تاریخ : <span class="date">${creation_date}</span></p>
+                <p>آخرین تغییرات در : <span class="date">${modify_date}</span></p>
+                <p>با موضوع : <span class="category">${categories.join(",")}</span></p>
+                <hr />
+                ${content}
+                <hr>
+                <p>کلمات کلیدی : <span class="category">${tags.join(",")}</span></p>
+            </div>
+            </body>
+        </html>
+        `;
+      };
+
+      let findText = (root, child) => {
+        return root.querySelector(child).textContent.trim();
+      };
+
+      let collectAll = (post, root, child) => {
+        let elements = new Array();
+        post
+          .querySelector(root)
+          .querySelectorAll(child)
+          .forEach((element) => {
+            elements.push(findText(element, "NAME"));
+          });
+        return elements;
+      };
+
+      let readXML = (text, file) => {
+        const parser = new DOMParser();
+        const tree = parser.parseFromString(text, "text/xml");
+
+        if (tree.querySelector("parsererror")) {
+          console.error("error while parsing");
+          return null;
+        }
+
+        let archive = new JSZip();
+        let posts_path = archive.folder("posts");
+        let statics_path = archive.folder("statics");
+        let images_path = archive.folder("statics/images");
+
+        statics_path.file("main.css", emitStyle());
+
+        const blog = tree.querySelector("BLOG");
+        const info = blog.querySelector("BLOG_INFO");
+        const blog_title = findText(info, "TITLE");
+        const blog_desc = findText(info, "TITLE");
+        let blog_authors = new Array();
+
+        info
+          .querySelector("AUTHORS")
+          .querySelectorAll("AUTHRO")
+          .forEach((authors) => {
+            blog_authors.push(
+              findText(authors, "FIRST_NAME") 
+              + " " +
+              findText(authors, "LAST_NAME")
+            );
+          });
+
+        let posts = new Array();
+
+        blog
+          .querySelector("POSTS")
+          .querySelectorAll("POST")
+          .forEach((post) => {
+            const index = findText(post, "NUMBER");
+            const title = findText(post, "TITLE");
+            const content = findText(post, "CONTENT").replaceAll(
+              NON_HTTP_MATCH,
+              "https:$1"
+            );
+
+            // TODO: STATIC DOWNLOAD
+
+            const creation_date = findText(post, "CREATED_DATE");
+            const modify_date = findText(post, "LAST_MODIFIED_DATE");
+
+            let tags = collectAll(post, "TAGS", "TAG");
+            let categories = collectAll(post, "CATEGORIES", "CATEGORY");
+
+            const post_html = emitPostHTML(
+              title,
+              content,
+              creation_date,
+              modify_date,
+              categories,
+              tags,
+              blog_title
+            );
+
+            posts_path.file(`${index}.html`, post_html);
+            posts.push({ 'title': title, 'index': index });
+          });
+
+        const home_html = emitHomeHTML(
+          blog_title,
+          blog_desc,
+          blog_authors,
+          posts
+        );
+
+        posts_path.file("index.html", home_html);
+
+        archive.generateAsync({ type: 'blob' })
+        .then((content) => {
+            saveAs(content, 'backup.zip');
+        });
+      };
+
+
+      const botton = document.querySelector('#button')
+      const file = document.querySelector('#file')
+
+      button.addEventListener('click', (event) => {
+          event.preventDefault();
+          
+          const reader = new FileReader();
+
+          reader.onload = (event) => {
+            readXML(event.target.result);
+          };
+
+          reader.readAsText(file.files[0]);
+      })
+
+      file.addEventListener('change', (event) => {
+
+        if (event.target.files.length) {
+            button.disabled = false;
+        } else {
+            button.disabled = true;
+        }
+      });
+    </script>
+  </body>
+</html>
