@@ -48,12 +48,18 @@
     <main class="wrp">
       <form class="form">
         <label for="file">فایل XML خروجی از پنل را انتخاب کنید.</label>
-        <input id="file" type="file" accept=".xml" multiple="false" id="file" />
+        <input
+          id="file_picker"
+          type="file"
+          accept=".xml"
+          multiple="false"
+          id="file"
+        />
 
         <label for="donwload_static">تصاویر در خروجی ذخیره شوند؟</label>
-        <input type="checkbox" name="donwload_static" />
+        <input id="download_static" type="checkbox" name="download_static" />
 
-        <button disabled id="button">دریافت</button>
+        <button disabled id="start_process">دریافت</button>
 
         <span id="logs"></span>
       </form>
@@ -66,7 +72,12 @@
       referrerpolicy="no-referrer"
     ></script>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js" integrity="sha512-csNcFYJniKjJxRWRV1R7fvnXrycHP6qDR21mgz1ZP55xY5d+aHLfo9/FcGDQLfn2IfngbAHd8LdfsagcCqgTcQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js"
+      integrity="sha512-csNcFYJniKjJxRWRV1R7fvnXrycHP6qDR21mgz1ZP55xY5d+aHLfo9/FcGDQLfn2IfngbAHd8LdfsagcCqgTcQ=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
 
     <script>
       "use strict";
@@ -74,7 +85,35 @@
       const NON_HTTP_MATCH = /"((?!http.:)\/\/.+?)"/gim;
       const PICTURE_MATCH = /https?:\/\/\S+(?:jpe?g|png|bmp|gif|webp)/gim;
 
-      let emitStyle = () => {
+      const start_process_button = document.querySelector("#start_process");
+      const file_picker = document.querySelector("#file_picker");
+      const download_static_checkbox =
+        document.querySelector("#download_static");
+
+      const downloadAndSave = (url, archive) => {
+        return fetch(
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+          {
+            method: "GET",
+          }
+        )
+          .then((response) => {
+            return response.blob();
+          })
+          .then((blob) => {
+            filename = new URL(url).pathname.split("/").pop();
+            archive.file(filename, blob);
+
+            return filename;
+          })
+          .catch((error) => {
+            console.error(error);
+
+            return false;
+          });
+      };
+
+      const emitStyle = () => {
         return `
         body {
           background-color: lightgray;
@@ -100,7 +139,7 @@
       `;
       };
 
-      let emitHomeHTML = (title, desc, authors, posts) => {
+      const emitHomeHTML = (title, desc, authors, posts) => {
         let posts_html = "<ol reversed>";
         posts.forEach((post) => {
           posts_html += `<li><a href="./${post["index"]}.html">${post["title"]}</a></li>`;
@@ -127,7 +166,7 @@
           `;
       };
 
-      let emitPostHTML = (
+      const emitPostHTML = (
         title,
         content,
         creation_date,
@@ -149,22 +188,26 @@
                 <h2 class="title">${title}</h2>
                 <p>ایجاد در تاریخ : <span class="date">${creation_date}</span></p>
                 <p>آخرین تغییرات در : <span class="date">${modify_date}</span></p>
-                <p>با موضوع : <span class="category">${categories.join(",")}</span></p>
+                <p>با موضوع : <span class="category">${categories.join(
+                  ","
+                )}</span></p>
                 <hr />
                 ${content}
                 <hr>
-                <p>کلمات کلیدی : <span class="category">${tags.join(",")}</span></p>
+                <p>کلمات کلیدی : <span class="category">${tags.join(
+                  ","
+                )}</span></p>
             </div>
             </body>
         </html>
         `;
       };
 
-      let findText = (root, child) => {
+      const findText = (root, child) => {
         return root.querySelector(child).textContent.trim();
       };
 
-      let collectAll = (post, root, child) => {
+      const collectAll = (post, root, child) => {
         let elements = new Array();
         post
           .querySelector(root)
@@ -175,7 +218,7 @@
         return elements;
       };
 
-      let readXML = (text, file) => {
+      const readXML = async (text) => {
         const parser = new DOMParser();
         const tree = parser.parseFromString(text, "text/xml");
 
@@ -202,9 +245,9 @@
           .querySelectorAll("AUTHRO")
           .forEach((authors) => {
             blog_authors.push(
-              findText(authors, "FIRST_NAME") 
-              + " " +
-              findText(authors, "LAST_NAME")
+              findText(authors, "FIRST_NAME") +
+                " " +
+                findText(authors, "LAST_NAME")
             );
           });
 
@@ -213,15 +256,27 @@
         blog
           .querySelector("POSTS")
           .querySelectorAll("POST")
-          .forEach((post) => {
+          .forEach(async (post) => {
             const index = findText(post, "NUMBER");
             const title = findText(post, "TITLE");
-            const content = findText(post, "CONTENT").replaceAll(
+            let content = findText(post, "CONTENT").replaceAll(
               NON_HTTP_MATCH,
               "https:$1"
             );
 
             // TODO: STATIC DOWNLOAD
+            if (download_static_checkbox.checked) {
+              for (const match of content.matchAll(PICTURE_MATCH)) {
+                const result = downloadAndSave(match[0], statics_path);
+
+                if (!result) {
+                  console.error("Could not fetch `%s`", match[0]);
+                  continue;
+                }
+
+                content = content.replace(match[0], `statics/images/${result}`);
+              }
+            }
 
             const creation_date = findText(post, "CREATED_DATE");
             const modify_date = findText(post, "LAST_MODIFIED_DATE");
@@ -240,7 +295,7 @@
             );
 
             posts_path.file(`${index}.html`, post_html);
-            posts.push({ 'title': title, 'index': index });
+            posts.push({ title: title, index: index });
           });
 
         const home_html = emitHomeHTML(
@@ -252,34 +307,28 @@
 
         posts_path.file("index.html", home_html);
 
-        archive.generateAsync({ type: 'blob' })
-        .then((content) => {
-            saveAs(content, 'backup.zip');
+        archive.generateAsync({ type: "blob" }).then((content) => {
+          saveAs(content, "backup.zip");
         });
       };
 
+      start_process_button.addEventListener("click", (event) => {
+        event.preventDefault();
 
-      const botton = document.querySelector('#button')
-      const file = document.querySelector('#file')
+        const reader = new FileReader();
 
-      button.addEventListener('click', (event) => {
-          event.preventDefault();
-          
-          const reader = new FileReader();
+        reader.onload = (event) => {
+          readXML(event.target.result);
+        };
 
-          reader.onload = (event) => {
-            readXML(event.target.result);
-          };
+        reader.readAsText(file_picker.files[0]);
+      });
 
-          reader.readAsText(file.files[0]);
-      })
-
-      file.addEventListener('change', (event) => {
-
+      file_picker.addEventListener("change", (event) => {
         if (event.target.files.length) {
-            button.disabled = false;
+          start_process_button.disabled = false;
         } else {
-            button.disabled = true;
+          start_process_button.disabled = true;
         }
       });
     </script>
